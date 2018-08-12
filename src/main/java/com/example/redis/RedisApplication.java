@@ -14,14 +14,20 @@ import org.springframework.data.geo.Circle;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResults;
 import org.springframework.data.geo.Point;
+import org.springframework.data.redis.connection.Message;
+import org.springframework.data.redis.connection.MessageListener;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.GeoOperations;
 import org.springframework.data.redis.core.RedisHash;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.index.Indexed;
+import org.springframework.data.redis.listener.PatternTopic;
+import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.repository.CrudRepository;
 
 import java.io.Serializable;
+import java.time.Instant;
 import java.util.*;
 
 @Log
@@ -76,6 +82,30 @@ public class RedisApplication {
 			Collection<Order> found = orderRepository.findByWhen(order.getWhen());
 			found.forEach(o -> log.info("found: " + o.toString()));
 		});
+	}
+
+	private final String topic = "chat";
+
+	@Bean
+	ApplicationRunner pubsub(RedisTemplate<String, String> rt) {
+		return titledRunner("publish.subscribe", args -> {
+			rt.convertAndSend(topic, "Hello, World @" + Instant.now().toString());
+		});
+	}
+
+	@Bean
+	RedisMessageListenerContainer listener(RedisConnectionFactory cf) {
+		MessageListener ml = new MessageListener() {
+			@Override
+			public void onMessage(Message message, byte[] pattern) {
+				String str = new String(message.getBody());
+				log.info("message from " + topic + " : " + str);
+			}
+		};
+		RedisMessageListenerContainer mlc = new RedisMessageListenerContainer();
+		mlc.setConnectionFactory(cf);
+		mlc.addMessageListener(ml, new PatternTopic(this.topic));
+		return mlc;
 	}
 
 	private Long generateId() {
