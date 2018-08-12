@@ -7,6 +7,9 @@ import lombok.extern.java.Log;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Reference;
@@ -14,6 +17,7 @@ import org.springframework.data.geo.Circle;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResults;
 import org.springframework.data.geo.Point;
+import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -25,14 +29,23 @@ import org.springframework.data.redis.core.index.Indexed;
 import org.springframework.data.redis.listener.PatternTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.repository.CrudRepository;
+import org.springframework.stereotype.Service;
 
 import java.io.Serializable;
 import java.time.Instant;
 import java.util.*;
 
 @Log
+@EnableCaching
 @SpringBootApplication
 public class RedisApplication {
+
+	@Bean
+	CacheManager redisCache(RedisConnectionFactory cf) {
+		return RedisCacheManager
+				.builder(cf)
+				.build();
+	}
 
 	private ApplicationRunner titledRunner(String title, ApplicationRunner rr) {
 		return args -> {
@@ -113,6 +126,23 @@ public class RedisApplication {
 		return Math.max(tmp, tmp* -1);
 	}
 
+	private long measure(Runnable r) {
+		long start = System.currentTimeMillis();
+		r.run();
+		long stop = System.currentTimeMillis();
+		return stop - start;
+	}
+
+	@Bean
+	ApplicationRunner cache (OrderService orderService) {
+		return titledRunner("caching", args -> {
+			Runnable measure = () -> orderService.byId(1L);
+			log.info("first " + measure(measure));
+			log.info("second " + measure(measure));
+			log.info("third " + measure(measure));
+		});
+	}
+
 
 	public static void main(String[] args) {
 		SpringApplication.run(RedisApplication.class, args);
@@ -126,6 +156,22 @@ interface OrderRepository extends CrudRepository<Order, Long> {
 
 interface LineItemRepository extends CrudRepository<LineItem, Long> {
 
+}
+
+@Service
+class OrderService {
+
+	@Cacheable("order-by-id")
+	public Order byId(Long id) {
+
+		try {
+			Thread.sleep(1000 * 10);
+		}catch(Exception ex) {
+			throw new RuntimeException();
+		}
+
+		return new Order(id, new Date(), Collections.emptyList());
+	}
 }
 
 @Data
